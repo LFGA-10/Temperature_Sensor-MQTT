@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SANDRA | Real-Time Temperature & MQTT Monitor</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Paho MQTT Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+    
+    <style>
+        :root {
+            --bg-color: #0b0c10;
+            --card-bg: rgba(31, 38, 57, 0.4);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #f5f6fa;
+            --text-secondary: #8b9bb4;
+            --accent-cyan: #00f2fe;
+            --accent-purple: #4facfe;
+            --accent-green: #39ff14;
+            --accent-red: #ff3366;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(79, 172, 254, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(0, 242, 254, 0.08) 0%, transparent 40%);
+        }
+
+        header {
+            padding: 2rem;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(11, 12, 16, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 10;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            letter-spacing: 2px;
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+        }
+
+        header p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-top: 0.5rem;
+            font-weight: 300;
+        }
+
+        main {
+            flex: 1;
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 2rem;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+        }
+
+        @media (min-width: 900px) {
+            main {
+                grid-template-columns: 350px 1fr;
+            }
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 2rem;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: transform 0.3s ease, border-color 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: rgba(0, 242, 254, 0.2);
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--accent-red);
+            box-shadow: 0 0 10px var(--accent-red);
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background-color: var(--accent-green);
+            box-shadow: 0 0 10px var(--accent-green);
+        }
+
+        .gauge-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem 0;
+            position: relative;
+        }
+
+        .temp-display {
+            font-size: 4.5rem;
+            font-weight: 800;
+            text-align: center;
+            line-height: 1;
+            background: linear-gradient(135deg, #fff, #b8c6db);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-top: 1rem;
+        }
+
+        .temp-unit {
+            font-size: 2rem;
+            font-weight: 400;
+            vertical-align: super;
+            color: var(--accent-cyan);
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            padding-top: 1.5rem;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+        }
+
+        .info-label {
+            color: var(--text-secondary);
+        }
+
+        .info-value {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-primary);
+        }
+
+        .chart-card {
+            min-height: 400px;
+        }
+
+        .console-card {
+            grid-column: 1 / -1;
+            background: rgba(10, 11, 14, 0.6);
+        }
+
+        .console-output {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            height: 150px;
+            overflow-y: auto;
+            color: #58e2a1;
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 0.5rem;
+        }
+
+        .console-line {
+            display: flex;
+            justify-content: flex-start;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            padding-bottom: 0.2rem;
+        }
+
+        .console-time {
+            color: #8b9bb4;
+            margin-right: 1rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border-color);
+            background: rgba(11, 12, 16, 0.9);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>SANDRA | Temperature Monitor</h1>
+        <p>Real-Time MQTT Telemetry Dashboard & Data Visualizer</p>
+    </header>
+
+    <main>
+        <!-- Left Column: Gauge and Info -->
+        <div class="card">
+            <div>
+                <div class="card-title">
+                    Live Telemetry
+                    <div id="statusDot" class="status-dot"></div>
+                </div>
+                <div class="gauge-container">
+                    <div class="temp-display"><span id="tempVal">--.-</span><span class="temp-unit">°C</span></div>
+                </div>
+            </div>
+            <div class="info-grid">
+                <div class="info-row">
+                    <span class="info-label">Status:</span>
+                    <span class="info-value" id="statusText" style="color: var(--accent-red);">Connecting...</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Broker:</span>
+                    <span class="info-value">test.mosquitto.org</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Port:</span>
+                    <span class="info-value">8081 (WSS)</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Topic:</span>
+                    <span class="info-value">sensor/arduino/temperature</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Real-Time Chart -->
+        <div class="card chart-card">
+            <div class="card-title">Temperature History (Last 30 Readings)</div>
+            <div style="position: relative; flex: 1; min-height: 300px; width: 100%;">
+                <canvas id="tempChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Full-Width Bottom Row: Console Logger -->
+        <div class="card console-card">
+            <div class="card-title">Live Message Stream (MQTT Logs)</div>
+            <div class="console-output" id="consoleOutput">
+                <div class="console-line"><span class="console-time">--:--:--</span>[System] Initializing MQTT client over WebSockets...</div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>Designed for Temperature Display and MQTT Monitoring Assignment &copy; 2026</p>
+    </footer>
+
+    <script>
+        const broker = "test.mosquitto.org";
+        const port = 8081;
+        const topic = "sensor/arduino/temperature";
+        const clientId = "web_dashboard_" + Math.random().toString(16).substr(2, 8);
+
+        const statusDot = document.getElementById("statusDot");
+        const statusText = document.getElementById("statusText");
+        const tempVal = document.getElementById("tempVal");
+        const consoleOutput = document.getElementById("consoleOutput");
+
+        // 1. Initialize Chart.js
+        const ctx = document.getElementById('tempChart').getContext('2d');
+        const maxDataPoints = 30;
+        
+        const tempChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Temperature (°C)',
+                    data: [],
+                    borderColor: '#00f2fe',
+                    backgroundColor: 'rgba(0, 242, 254, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#4facfe',
+                    pointBorderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#8b9bb4', font: { family: 'Outfit' } }
+                    },
+                    y: {
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#8b9bb4', font: { family: 'Outfit' } },
+                        suggestedMin: 15,
+                        suggestedMax: 35
+                    }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+
+        // Logger helper
+        function logMessage(msg) {
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0];
+            const line = document.createElement("div");
+            line.className = "console-line";
+            line.innerHTML = `<span class="console-time">[${timeStr}]</span> ${msg}`;
+            consoleOutput.prepend(line);
+            
+            // Cap console size
+            if (consoleOutput.children.length > 50) {
+                consoleOutput.removeChild(consoleOutput.lastChild);
+            }
+        }
+
+        // 2. Setup MQTT Client over WebSockets (wss://)
+        logMessage(`[System] Connecting to wss://${broker}:${port}/mqtt...`);
+        const client = new Paho.MQTT.Client(broker, Number(port), "/mqtt", clientId);
+
+        client.onConnectionLost = onConnectionLost;
+        client.onMessageArrived = onMessageArrived;
+
+        const options = {
+            useSSL: true,
+            onSuccess: onConnect,
+            onFailure: onFailure,
+            keepAliveInterval: 30,
+            reconnect: true
+        };
+
+        client.connect(options);
+
+        function onConnect() {
+            logMessage("[MQTT] Connected successfully to Mosquitto Broker via Secure WebSockets.");
+            statusDot.className = "status-dot connected";
+            statusText.innerText = "Connected";
+            statusText.style.color = "var(--accent-green)";
+            
+            logMessage(`[MQTT] Subscribing to topic: ${topic}`);
+            client.subscribe(topic);
+        }
+
+        function onFailure(err) {
+            logMessage(`[MQTT] Connection failed: ${err.errorMessage}`);
+            statusDot.className = "status-dot";
+            statusText.innerText = "Connection Failed";
+            statusText.style.color = "var(--accent-red)";
+        }
+
+        function onConnectionLost(responseObject) {
+            logMessage(`[MQTT] Connection lost. Reason: ${responseObject.errorMessage}`);
+            statusDot.className = "status-dot";
+            statusText.innerText = "Disconnected";
+            statusText.style.color = "var(--accent-red)";
+        }
+
+        function onMessageArrived(message) {
+            const payload = message.payloadString;
+            logMessage(`[MQTT Msg] Topic: ${message.destinationName} | Payload: ${payload}`);
+            
+            const temp = parseFloat(payload);
+            if (!isNaN(temp)) {
+                // Update Gauge display
+                tempVal.innerText = temp.toFixed(1);
+                
+                // Update graph dynamic label
+                const now = new Date();
+                const timeStr = now.toTimeString().split(' ')[0].substring(3, 8); // MM:SS
+                
+                // Add new reading to chart
+                if (tempChart.data.labels.length >= maxDataPoints) {
+                    tempChart.data.labels.shift();
+                    tempChart.data.datasets[0].data.shift();
+                }
+                tempChart.data.labels.push(timeStr);
+                tempChart.data.datasets[0].data.push(temp);
+                tempChart.data.update();
+            }
+        }
+    </script>
+</body>
+</html>
